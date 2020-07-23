@@ -6,27 +6,37 @@ services:
     image: grafana/grafana:6.5.1
     restart: unless-stopped
     volumes:
+      # The volume where we persist grafana data.
       - grafana:/var/lib/grafana
+      # The three binds of configuration files and folders form the host system
+      # to the container.
       - ./config/grafana/grafana.ini:/etc/grafana/grafana.ini
       - ./config/grafana/provisioning:/etc/grafana/provisioning
       - ./config/grafana/dashboards:/var/lib/grafana/dashboards
     ports:
       - 3000:3000
 
+
   prometheus:
     image: prom/prometheus:v2.14.0
     restart: unless-stopped
     command: [ "--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus", "--web.console.libraries=/usr/share/prometheus/console_libraries", "--web.console.templates=/usr/share/prometheus/consoles", "--storage.tsdb.retention.time=100y" ]
     volumes:
+      # The volume where we persist prometheus data
       - prometheus-tsdb:/prometheus
+      # The two binds of configuration files form the host system to the
+      # container.
       - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - ./config/prometheus/rules.yml:/etc/prometheus/rules.yml
     ports:
       - 9090:9090
 
+
   prometheus-blackbox-exporter:
     image: prom/blackbox-exporter:v0.16.0
+    restart: unless-stopped
     volumes:
+      # Bind of configuration file.
       - ./config/prometheus/blackbox.yml:/etc/blackbox_exporter/config.yml
 
 volumes:
