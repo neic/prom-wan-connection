@@ -6,43 +6,15 @@ rule_files:
   - /etc/prometheus/rules.yml
 
 scrape_configs:
-  - job_name: 'edgemax'
-    static_configs:
-      - targets:
-        - 192.168.0.1  # SNMP device.
-    metrics_path: /snmp
-    params:
-      module: [ubiquiti_edgemax]
-    relabel_configs:
-      - source_labels: [__address__]
-        target_label: __param_target
-      - source_labels: [__param_target]
-        target_label: instance
-      - target_label: __address__
-        replacement: prometheus-snmp-exporter:9116  # The SNMP exporter's Service name and port.
-
-  - job_name: 'node'
-    static_configs:
-      - targets: ['192.168.0.2:9100']
-
-  - job_name: 'traefik'
-    static_configs:
-      - targets: ['traefik:8082']
-
   - job_name: 'pings'
     metrics_path: /probe
     params:
       module: [icmp_ipv4]
     static_configs:
       - targets:
-        - localhost
-        - 192.168.0.1 # Edgerouter LAN
-        - 100.100.144.1 # Edgerouter WAN
         - google.com
         - github.com
         - cloudflare.com
-        - danishdecoration.dk
-        - neic.dk # Github
     relabel_configs:
       - source_labels: [__address__]
         target_label: __param_target
@@ -50,12 +22,3 @@ scrape_configs:
         target_label: instance
       - target_label: __address__
         replacement: prometheus-blackbox-exporter:9115  # This is your blackbox exporter.
-
-  - job_name: 'prometheus'
-    static_configs:
-      - targets: ['localhost:9090']
-
-  - job_name: "synapse"
-    metrics_path: "/_synapse/metrics"
-    static_configs:
-      - targets: ["synapse:9000"]
