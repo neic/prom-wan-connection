@@ -1,0 +1,20 @@
+groups:
+- name: wanUptime
+  rules:
+  - record: wanUptime_connected
+    expr: 2 <= bool sum(probe_success{instance=~"cloudflare.com|google.com|github.com"})
+
+  - record: wanUptime_slidingWindow_5m
+    expr: avg_over_time(wanUptime_connected[5m:5s])
+
+  - record: wanUptime_slidingWindow_15m
+    expr: avg_over_time(wanUptime_connected[15m:5s])
+
+  - record: wanUptime_slidingWindow_1h
+    expr: avg_over_time(wanUptime_connected[1h:5s])
+
+  - record: wanUptime_slidingWindow_24h
+    expr: avg_over_time(wanUptime_connected[24h:5s])
+
+  - record: wanUptime_slidingWindow_30d
+    expr: avg_over_time(wanUptime_connected[30d:5s])

@@ -1,0 +1,335 @@
+version: '3'
+
+services:
+
+#################
+### nextcloud ###
+#################
+
+  nextcloud-db:
+    image: mariadb:10
+    restart: unless-stopped
+    volumes:
+      - nextcloud-db:/var/lib/mysql
+    env_file:
+      - nextcloud-db.env
+
+  nextcloud-redis:
+    image: redis:4
+    restart: unless-stopped
+    sysctls:
+      net.core.somaxconn: '511'
+
+  nextcloud-app:
+    image: nextcloud:17
+    restart: unless-stopped
+    volumes:
+      - nextcloud-app:/var/www/html
+      - /tank/neic/nextclouddata/:/var/www/html/data
+      - ./config/nextcloud/redis.config.php:/var/www/html/config/redis.config.php
+      - ./config/nextcloud/extra.config.php:/var/www/html/config/extra.config.php
+    environment:
+      - MYSQL_HOST=nextcloud-db
+    env_file:
+      - nextcloud-db.env
+    hostname: nextcloud.neic.dk
+    depends_on:
+      - nextcloud-db
+      - nextcloud-redis
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.nextcloud.rule=Host(`nextcloud.neic.dk`)
+      - traefik.http.routers.nextcloud.entrypoints=external-https
+      - traefik.http.routers.nextcloud.tls.certResolver=le
+      - traefik.http.routers.nextcloud.tls.domains[0].main=neic.dk
+      - traefik.http.routers.nextcloud.tls.domains[0].sans=*.neic.dk
+      - traefik.http.routers.nextcloud.middlewares=secureheaders@file,nextcloud-webdav-redirect@docker
+      #- traefik.http.middlewares.nextcloud.chain.middlewares=secureheaders@file,nextcloud-webdav-redirect@docker
+      # Workarround for https://github.com/nextcloud/docker/issues/577
+      - traefik.http.middlewares.nextcloud-webdav-redirect.redirectregex.permanent=true
+      - traefik.http.middlewares.nextcloud-webdav-redirect.redirectregex.regex=https://(.*)/.well-known/(card|cal)dav
+      - traefik.http.middlewares.nextcloud-webdav-redirect.redirectregex.replacement=https://$$1/remote.php/dav/
+
+  nextcloud-cron:
+    image: nextcloud:17
+    restart: unless-stopped
+    volumes:
+      - nextcloud-app:/var/www/html
+      - /tank/neic/nextclouddata/:/var/www/html/data
+      - ./config/nextcloud/redis.config.php:/var/www/html/config/redis.config.php
+      - ./config/nextcloud/extra.config.php:/var/www/html/config/extra.config.php
+    entrypoint: /cron.sh
+    environment:
+      - MYSQL_HOST=nextcloud-db
+    env_file:
+      - nextcloud-db.env
+    depends_on:
+      - nextcloud-db
+      - nextcloud-redis
+
+
+####################
+### wiply static ###
+####################
+
+  wiply-static:
+    image: nginx:latest
+    restart: unless-stopped
+    volumes:
+      - /tank/www:/var/www
+      - ./config/wiply-static:/etc/nginx/conf.d:ro
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.wiply-static.rule=Host(`wiply.neic.dk`)
+      - traefik.http.routers.wiply-static.entrypoints=external-https
+      - traefik.http.routers.wiply-static.tls.certResolver=le
+      - traefik.http.routers.wiply-static.tls.domains[0].main=neic.dk
+      - traefik.http.routers.wiply-static.tls.domains[0].sans=*.neic.dk
+      - traefik.http.routers.wiply-static.middlewares=secureheaders@file
+
+
+##############
+### Matrix ###
+##############
+
+  synapse:
+    image: matrixdotorg/synapse:v1.10.0
+    restart: unless-stopped
+    environment:
+      - SYNAPSE_CONFIG_DIR=/config
+    volumes:
+      - ./config/matrix/synapse:/config
+      - synapse-app:/data
+    depends_on:
+      - synapse-db
+    labels:
+      - traefik.enable=true
+      # There is a SRV record from _matrix._tcp.neic.dk to matrix.neic.dk.
+      # Servers connect to the correct IP-address, but with the header `Host:
+      # neic.dk`. We route that traffic as well.
+      - traefik.http.routers.synapse.rule=Host(`matrix.neic.dk`) || (Host(`neic.dk`) && PathPrefix(`/_matrix`))
+      - traefik.http.routers.synapse.entrypoints=external-https
+      - traefik.http.routers.synapse.tls.certResolver=le
+      - traefik.http.routers.synapse.tls.domains[0].main=neic.dk
+      - traefik.http.routers.synapse.tls.domains[0].sans=*.neic.dk
+      #- traefik.http.routers.synapse.middlewares=secureheaders@file
+      - traefik.http.services.synapse.loadbalancer.server.port=8008
+
+  synapse-db:
+    image: postgres:12
+    env_file:
+      - synapse-db.env
+    volumes:
+      - synapse-db:/var/lib/postgresql/data
+
+
+################
+### jellyfin ###
+################
+
+  jellyfin:
+    image: jellyfin/jellyfin
+    restart: unless-stopped
+    volumes:
+      - /tank/neic2/Video/Film:/mnt/share1/Film:ro
+      - /tank/neic2/Video/Serier:/mnt/share1/Serier:ro
+      - /tank/neic2/Video/Dokumentar:/mnt/share1/Dokumentar:ro
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.jellyfin.rule=Host(`jellyfin.neic.dk`)
+      - traefik.http.routers.jellyfin.entrypoints=internal-https
+      - traefik.http.routers.jellyfin.tls.certResolver=le
+      - traefik.http.routers.jellyfin.tls.domains[0].main=neic.dk
+      - traefik.http.routers.jellyfin.tls.domains[0].sans=*.neic.dk
+      - traefik.http.services.jellyfin.loadbalancer.server.port=8096
+
+
+##############
+### pihole ###
+##############
+
+  pihole:
+    image: pihole/pihole:latest
+    restart: always
+    ports:
+      - "192.168.0.53:53:53/tcp" # DNS
+      - "192.168.0.53:53:53/udp" # DNS
+      #- "67:67/udp" # DHCP
+      - "192.168.0.53:80:80/tcp" # HTTP
+      - "192.168.0.53:443:443/tcp" # HTTPS
+    environment:
+      TZ: 'Europe/Copenhagen'
+      DNS1: 1.1.1.1
+      DNS2: 1.0.0.1
+      ServerIP: 192.168.0.53
+      VIRTUAL_HOST: pihole.neic.dk
+    volumes:
+       - pihole:/etc/pihole/
+       - ./config/pihole/dnsmasq.d/03-internal-domains.conf:/etc/dnsmasq.d/03-internal-domains.conf
+    dns:
+      - 127.0.0.1
+      - 1.1.1.1
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.pihole-admin.rule=Host(`pihole.neic.dk`)
+      - traefik.http.routers.pihole-admin.entrypoints=internal-https
+      - traefik.http.routers.pihole-admin.tls.certResolver=le
+      - traefik.http.routers.pihole-admin.tls.domains[0].main=neic.dk
+      - traefik.http.routers.pihole-admin.tls.domains[0].sans=*.neic.dk
+      - traefik.http.services.pihole-admin.loadbalancer.server.port=80
+
+
+#############
+### Unifi ###
+#############
+
+  unifi:
+    image: jacobalberty/unifi:stable
+    restart: unless-stopped
+    environment:
+      - RUNAS_UID0=false
+      - UNIFI_UID=73200
+      - UNIFI_GID=73200
+      - TZ=Europe/Copenhagen
+      - DB_URI=mongodb://unifi-db/unifi
+      - STATDB_URI=mongodb://unifi-db/unifi_stat
+      - DB_NAME=unifi
+    depends_on:
+      - unifi-db
+    ports:
+      - "192.168.0.4:3478:3478/udp" # STUN
+      - "192.168.0.4:6789:6789/tcp" # Speed test
+      - "192.168.0.4:8080:8080/tcp" # Device/ controller comm.
+      #- "192.168.0.4:443:8443/tcp" # Controller GUI/API as seen in a web browser
+      - "192.168.0.4:8880:8880/tcp" # HTTP portal redirection
+      - "192.168.0.4:8843:8843/tcp" # HTTPS portal redirection
+      - "192.168.0.4:10001:10001/udp" # AP discovery
+    volumes:
+      - unifi-app:/unifi/data
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.unifi.rule=Host(`unifi.neic.dk`)
+      - traefik.http.routers.unifi.entrypoints=internal-https
+      - traefik.http.routers.unifi.tls.certResolver=le
+      - traefik.http.routers.unifi.tls.domains[0].main=neic.dk
+      - traefik.http.routers.unifi.tls.domains[0].sans=*.neic.dk
+      - traefik.http.services.unifi.loadbalancer.server.port=8443
+      - traefik.http.services.unifi.loadbalancer.server.scheme=https
+
+  unifi-db:
+    image: mongo:3.4
+    restart: unless-stopped
+    volumes:
+      - unifi-db:/data/db
+
+
+###########################
+### OSM tasking-manager ###
+###########################
+
+  tm:
+    image: hotosm/tasking-manager:version-3.4.1
+    restart: unless-stopped
+    depends_on:
+      - tm-db
+    env_file:
+      - tm-db.env
+      - tm.env
+    environment:
+      TM_APP_BASE_URL: https://osmtm.neic.dk
+      POSTGRES_ENDPOINT: tm-db
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.osmtm.rule=Host(`osmtm.neic.dk`)
+      - traefik.http.routers.osmtm.entrypoints=external-https
+      - traefik.http.routers.osmtm.tls.certResolver=le
+      - traefik.http.routers.osmtm.tls.domains[0].main=neic.dk
+      - traefik.http.routers.osmtm.tls.domains[0].sans=*.neic.dk
+      - traefik.http.routers.osmtm.middlewares=secureheaders@file
+      - traefik.http.services.osmtm.loadbalancer.server.port=5000
+
+  tm-db:
+    image: mdillon/postgis:11
+    env_file:
+      - tm-db.env
+
+##################
+### Prometheus ###
+##################
+
+  grafana:
+    image: grafana/grafana:6.5.1
+    restart: unless-stopped
+    volumes:
+      - grafana:/var/lib/grafana
+      - ./config/grafana/grafana.ini:/etc/grafana/grafana.ini
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.grafana.rule=Host(`grafana.neic.dk`)
+      - traefik.http.routers.grafana.entrypoints=internal-https
+      - traefik.http.routers.grafana.tls.certResolver=le
+      - traefik.http.routers.grafana.tls.domains[0].main=neic.dk
+      - traefik.http.routers.grafana.tls.domains[0].sans=*.neic.dk
+      - traefik.http.services.grafana.loadbalancer.server.port=3000
+
+  prometheus:
+    image: prom/prometheus:v2.14.0
+    restart: unless-stopped
+    command: [ "--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus", "--web.console.libraries=/usr/share/prometheus/console_libraries", "--web.console.templates=/usr/share/prometheus/consoles", "--storage.tsdb.retention.time=100y" ]
+    volumes:
+      - prometheus-tsdb:/prometheus
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./config/prometheus/rules.yml:/etc/prometheus/rules.yml
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.prometheus.rule=Host(`prometheus.neic.dk`)
+      - traefik.http.routers.prometheus.entrypoints=internal-https
+      - traefik.http.routers.prometheus.tls.certResolver=le
+      - traefik.http.routers.prometheus.tls.domains[0].main=neic.dk
+      - traefik.http.routers.prometheus.tls.domains[0].sans=*.neic.dk
+      - traefik.http.services.prometheus.loadbalancer.server.port=9090
+
+  prometheus-snmp-exporter:
+    image: prom/snmp-exporter:v0.15.0
+    volumes:
+      - ./config/prometheus/snmp.yml:/etc/snmp_exporter/snmp.yml
+
+  prometheus-blackbox-exporter:
+    image: prom/blackbox-exporter:v0.16.0
+    volumes:
+      - ./config/prometheus/blackbox.yml:/etc/blackbox_exporter/config.yml
+
+###############
+### traefik ###
+###############
+
+  traefik:
+    image: traefik:2.1
+    restart: unless-stopped
+    ports:
+      - 192.168.0.2:80:80
+      - 192.168.0.2:443:443
+      - 192.168.0.3:80:8081
+      - 192.168.0.3:443:8443
+    environment:
+      - GCE_SERVICE_ACCOUNT_FILE=/GCE_ACC_FILE.json
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./config/traefik/traefik.toml:/etc/traefik/traefik.toml:ro
+      - ./config/traefik/dynamic_conf.toml:/dynamic_conf.toml:ro
+      - ./GCE_ACC_FILE.json:/GCE_ACC_FILE.json:ro
+      - ./acme.json:/acme.json
+
+volumes:
+  nextcloud-db:
+  nextcloud-app:
+  synapse-app:
+  synapse-db:
+  pihole:
+  unifi-app:
+  unifi-db:
+  grafana:
+  prometheus-tsdb:
