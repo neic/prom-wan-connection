@@ -10,14 +10,8 @@ services:
       - ./config/grafana/grafana.ini:/etc/grafana/grafana.ini
       - ./config/grafana/provisioning:/etc/grafana/provisioning
       - ./config/grafana/dashboards:/var/lib/grafana/dashboards
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.grafana.rule=Host(`grafana.neic.dk`)
-      - traefik.http.routers.grafana.entrypoints=internal-https
-      - traefik.http.routers.grafana.tls.certResolver=le
-      - traefik.http.routers.grafana.tls.domains[0].main=neic.dk
-      - traefik.http.routers.grafana.tls.domains[0].sans=*.neic.dk
-      - traefik.http.services.grafana.loadbalancer.server.port=3000
+    ports:
+      - 3000:3000
 
   prometheus:
     image: prom/prometheus:v2.14.0
@@ -27,14 +21,8 @@ services:
       - prometheus-tsdb:/prometheus
       - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - ./config/prometheus/rules.yml:/etc/prometheus/rules.yml
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.prometheus.rule=Host(`prometheus.neic.dk`)
-      - traefik.http.routers.prometheus.entrypoints=internal-https
-      - traefik.http.routers.prometheus.tls.certResolver=le
-      - traefik.http.routers.prometheus.tls.domains[0].main=neic.dk
-      - traefik.http.routers.prometheus.tls.domains[0].sans=*.neic.dk
-      - traefik.http.services.prometheus.loadbalancer.server.port=9090
+    ports:
+      - 9090:9090
 
   prometheus-blackbox-exporter:
     image: prom/blackbox-exporter:v0.16.0
